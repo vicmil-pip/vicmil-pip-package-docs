@@ -1,0 +1,1 @@
+{"config":{"lang":["en"],"separator":"[\\s\\-]+","pipeline":["stopWordFilter"]},"docs":[{"location":"","title":"Welcome to MkDocs","text":"<p>This is your homepage!</p>"},{"location":"vmdoc/vmdocs/","title":"Vmdoc Overview","text":"<p>This document lists all the generated documentation files.</p>"}]}
