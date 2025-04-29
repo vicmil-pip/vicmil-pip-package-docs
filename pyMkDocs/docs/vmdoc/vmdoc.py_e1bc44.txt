@@ -99,8 +99,8 @@ def generate_markdown_file(src_rel_path: str, src_abs_path: str, output_dir: str
     """Generate a markdown file with extracted content and link to raw source as .txt."""
     file_hash = hash_path(src_rel_path)
     base_name = os.path.basename(src_rel_path)
-    md_file_name = f"{base_name}_{file_hash}.md"
-    txt_file_name = f"{base_name}_{file_hash}.txt"
+    md_file_name = f"{base_name.replace("_", "")}_{file_hash}.md"
+    txt_file_name = f"{base_name.replace("_", "")}_{file_hash}.txt"
 
     output_md_path = os.path.join(output_dir, md_file_name)
     output_txt_path = os.path.join(output_dir, txt_file_name)
@@ -188,7 +188,7 @@ def vmdoc_generate_markdown_files(
         relative_path = os.path.relpath(file_path, src_dir)
         generate_markdown_file(relative_path, file_path, output_dir, description, '\n\n'.join(doc_tag_content))
 
-        vmdoc_description += f"- [{relative_path.replace(os.sep, '/')}]( {os.path.basename(relative_path)}_{hash_path(relative_path)}.md ) - {description}\n"
+        vmdoc_description += f"- [{relative_path.replace(os.sep, '/')}]( {os.path.basename(relative_path.replace("_", ""))}_{hash_path(relative_path)}.md ) - {description}\n"
 
     with open(os.path.join(output_dir, 'vmdocs.md'), 'w', encoding='utf-8') as f:
         f.write(vmdoc_description)

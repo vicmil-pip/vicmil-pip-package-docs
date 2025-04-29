@@ -3,10 +3,10 @@ title: __init__.py
 source_file: __init__.py
 description: The init file with instructions for how to use the library
 generated_from: vmdoc
-source_code_file: __init__.py_743b1a.txt
+source_code_file: init.py_743b1a.txt
 ---
 
-[📄 View raw source code](__init__.py_743b1a.txt)
+[📄 View raw source code](init.py_743b1a.txt)
 
 ## vicmil_generate_project_documentation
 
