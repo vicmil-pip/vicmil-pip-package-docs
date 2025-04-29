@@ -10,6 +10,7 @@ sys.path.append(str(Path(__file__).resolve().parents[0]))
 
 from include.mkdocs_build import *
 from include.vmdoc import vmdoc_generate_markdown_files
+import shutil
 
 
 
@@ -113,20 +114,39 @@ def update_packageDocs_readme():
         f.write("\n")
 
 
+def copy_directory(src_dir, dest_dir):
+    """
+    Copies the contents of src_dir to dest_dir.
+    If dest_dir exists, it will raise an error unless dirs_exist_ok=True (Python 3.8+).
+    """
+    if not os.path.exists(src_dir):
+        raise FileNotFoundError(f"Source directory '{src_dir}' does not exist.")
+    
+    # Optionally: remove dest_dir if you want to overwrite
+    if os.path.exists(dest_dir):
+        shutil.rmtree(dest_dir)
+    
+    shutil.copytree(src_dir, dest_dir)
+
 
 def generate_package_documentation(package_name: str):
     # The path where the documentation will be stored
-    docs_dir = get_directory_path(__file__, 1) + "/packageDocs"
+    package_dir = get_directory_path(__file__, 1) + "/" + package_name
 
-    if os.path.exists(docs_dir):
-        docs_dir = docs_dir + "/" + package_name
+    if os.path.exists(package_dir):
         # The path where to look for files with documentation
-        src_dir = get_directory_path(__file__)
+        docs_dir = package_dir + "/docs"
+        src_dir = package_dir
 
         # Ensure the mkdocs project is setup in the docs folder
         ensure_mkdocs_project_setup(docs_dir)
 
-        update_packageDocs_readme()
+        # Copy the documentation to packageDocs
+        package_docs_dir = get_directory_path(__file__, 1) + "/packageDocs"
+        if os.path.exists(package_docs_dir):
+            copy_directory(docs_dir, package_docs_dir + "/" + package_name)
+
+            update_packageDocs_readme()
 
         vicmil_generate_project_documentation(docs_dir, src_dir)
 

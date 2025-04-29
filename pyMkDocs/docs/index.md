@@ -1,3 +1,3 @@
-# Welcome to MkDocs
+# pyMkDocs
 
-This is your homepage!
+Automatically generate documentation using mkDocs
