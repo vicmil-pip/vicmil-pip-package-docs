@@ -89,6 +89,31 @@ def vicmil_generate_project_documentation(docs_dir: str, src_dir: str) -> None:
     compile_mkdocs(docs_dir)
 
 
+def update_packageDocs_readme():
+    # Get a list of all directories inside package path
+    # Then add a path to each one in the readme, i.e. [dir_name](<dir_name>/site/)
+
+    # Get a list of all directories inside packageDocs
+    docs_dir = get_directory_path(__file__, 1) + "/packageDocs"
+    readme_path = os.path.join(docs_dir, "README.md")
+
+    # Collect directory names (excluding files and hidden folders)
+    dir_names = [
+        name for name in os.listdir(docs_dir)
+        if os.path.isdir(os.path.join(docs_dir, name)) and not name.startswith(".")
+    ]
+
+    # Create markdown-style links for each directory
+    lines = [f"- [{name}]({name}/site/)" for name in sorted(dir_names)]
+
+    # Write the list to README.md
+    with open(readme_path, "w", encoding="utf-8") as f:
+        f.write("# Package Documentation Index\n\n")
+        f.write("\n".join(lines))
+        f.write("\n")
+
+
+
 def generate_package_documentation(package_name: str):
     # The path where the documentation will be stored
     docs_dir = get_directory_path(__file__, 1) + "/packageDocs"
@@ -97,6 +122,11 @@ def generate_package_documentation(package_name: str):
         docs_dir = docs_dir + "/" + package_name
         # The path where to look for files with documentation
         src_dir = get_directory_path(__file__)
+
+        # Ensure the mkdocs project is setup in the docs folder
+        ensure_mkdocs_project_setup(docs_dir)
+
+        update_packageDocs_readme()
 
         vicmil_generate_project_documentation(docs_dir, src_dir)
 
