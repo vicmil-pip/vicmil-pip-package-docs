@@ -1,0 +1,54 @@
+"""
+[vmdoc:description] Utility functions for installing emscripten, which is a compiler to compile c++ code for the web [vmdoc:enddescription] 
+"""
+
+import sys
+from pathlib import Path
+sys.path.append(str(Path(__file__).resolve().parents[0]))
+sys.path.append(str(Path(__file__).resolve().parents[1]))
+sys.path.append(str(Path(__file__).resolve().parents[2]))
+sys.path.append(str(Path(__file__).resolve().parents[3]))
+sys.path.append(str(Path(__file__).resolve().parents[4]))
+sys.path.append(str(Path(__file__).resolve().parents[5]))
+
+from vicmil_pip.packages.pyUtil import *
+
+
+def get_compiler_path():
+    if platform.system() == "Windows": # Windows
+        return '"' + get_directory_path(__file__, 0) + "/emsdk/upstream/emscripten/em++.bat" + '"'
+    else:
+        return '"' + get_directory_path(__file__, 0) + "/emsdk/upstream/emscripten/em++" + '"'
+    
+
+def get_output_file_extension():
+    return ".html"
+
+
+def install():
+    emsdk_output_directory: str = get_directory_path(__file__) + "/emsdk"
+    if platform.system() == "Linux":
+        # Download emsdk from git
+        emsdk_git_url = "https://github.com/emscripten-core/emsdk/archive/refs/heads/main.zip"
+        tmp_zip = get_directory_path(__file__, 0) + "/emsdk_temp.zip"
+        download_github_repo_as_zip(emsdk_git_url, tmp_zip)
+        unzip_without_top_dir(tmp_zip, emsdk_output_directory, True)
+
+        # Install emsdk
+        emsdk_path = emsdk_output_directory + "/emsdk"
+        run_command('chmod +x "' + emsdk_path + '"')
+        run_command('"' + emsdk_path + '" install latest')
+        run_command('"' + emsdk_path + '" activate latest')
+    elif platform.system() == "Windows":
+        tmp_zip = get_directory_path(__file__, 0) + "/emsdk_temp.zip"
+        google_drive_path = "TODO"
+        download_file_from_google_drive(google_drive_path, tmp_zip)
+        unzip_without_top_dir(tmp_zip, emsdk_output_directory, True)
+
+        old_name = emsdk_output_directory + "/emsdk-win"
+        new_name = emsdk_output_directory + "emsdk"
+        os.rename(old_name, new_name)
+
+
+if __name__ == "__main__":
+    install()

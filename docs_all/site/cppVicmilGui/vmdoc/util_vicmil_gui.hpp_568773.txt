@@ -1,0 +1,741 @@
+/*
+[vmdoc:description] Handle multiple images on a single texture, implement widget manager [vmdoc:enddescription]
+*/
+
+#pragma once
+
+#include "util_stb.hpp"
+#include "util_bin_packing.hpp"
+#include "util_opengl.hpp"
+#include "util_js.hpp"
+
+namespace vicmil
+{
+    class ImageManager
+    {
+    public:
+        vicmil::ImageRGBA_UChar cpu_image;
+        vicmil::GPUImage gpu_image;
+        vicmil::RectPacker _rect_packer;
+        std::map<std::string, vicmil::ImageRGBA_UChar> _images_raw;
+        bool cpu_image_updated = true;
+        ImageManager() {}
+        ImageManager(int w, int h)
+        {
+            if (!(vicmil::is_power_of_two(w) && vicmil::is_power_of_two(h)))
+            {
+                ThrowError("Image size must be power of 2: " << w << ", " << h);
+            }
+            cpu_image.resize(w, h);
+            _rect_packer = vicmil::RectPacker(w, h);
+        }
+
+        bool add_image(std::string image_name, vicmil::ImageRGBA_UChar image)
+        {
+            if (contains_image(image_name))
+            {
+                return false; // Image already exists
+            }
+            if (!_rect_packer.add_rect(image_name, image.w, image.h))
+            {
+                return false; // There is not enough space for the image on the larger canvas
+            }
+            _images_raw[image_name] = image;
+            vicmil::RectT<int> cpu_image_pos = _rect_packer.get_rect(image_name);
+            image.copy_to_image(&cpu_image, cpu_image_pos.x, cpu_image_pos.y);
+            cpu_image_updated = true;
+            return true;
+        }
+
+        void remove_image(std::string image_name)
+        {
+            if (!contains_image(image_name))
+            {
+                return; // There is no such image
+            }
+            _images_raw.erase(image_name);
+            _rect_packer.remove_rect(image_name);
+        }
+
+        inline bool contains_image(std::string image_name)
+        {
+            return _images_raw.count(image_name) != 0;
+        }
+
+        inline vicmil::RectT<int> get_image_pos_pixels(std::string image_name)
+        {
+            if (!contains_image(image_name))
+            {
+                return vicmil::RectT<int>(0, 0, 0, 0); // There is no such image
+            }
+            return _rect_packer.get_rect(image_name);
+        }
+
+        inline vicmil::GuiEngine::RectGL get_image_pos_gl(std::string image_name)
+        {
+            vicmil::RectT<int> image_pos_p = get_image_pos_pixels(image_name);
+            if (image_pos_p.w == 0)
+            {
+                return vicmil::GuiEngine::RectGL(0, 0, 0, 0); // Invalid image
+            }
+            return vicmil::GuiEngine::RectGL(
+                image_pos_p.x / (double)cpu_image.w,
+                image_pos_p.y / (double)cpu_image.h,
+                image_pos_p.w / (double)cpu_image.w,
+                image_pos_p.h / (double)cpu_image.h);
+        }
+
+        void update_gpu_image_with_cpu_image()
+        {
+            if (!cpu_image_updated)
+            {
+                return; // No need to push a gpu image if the cpu image has not been updated
+            }
+            cpu_image_updated = false;
+            if (gpu_image.texture.no_texture)
+            {
+                gpu_image = vicmil::GPUImage::from_CPUImage(cpu_image);
+            }
+            else
+            {
+                gpu_image.overwrite_with_CPUImage(cpu_image);
+            }
+        }
+    };
+
+    class FontImageManager
+    {
+    public:
+        std::shared_ptr<vicmil::ImageManager> image_manager;
+        std::shared_ptr<vicmil::MultiFontLoader> font_loader;
+
+        FontImageManager() {}
+        FontImageManager(
+            std::shared_ptr<vicmil::ImageManager> image_manager_,
+            std::shared_ptr<vicmil::MultiFontLoader> font_loader_) : image_manager(image_manager_), font_loader(font_loader_) {}
+
+        inline std::string _get_image_name(int unicode)
+        {
+            return "U_" + std::to_string(unicode);
+        }
+
+        /*
+        Adds the font image to the image manager if it does not already exist
+        Then get the image position
+        NOTE! You need to call image_manager.update_gpu_image_with_cpu_image() for it to load to the gpu
+            (Not ideal to do for every character, since the operation is computationally expensive)
+        */
+        inline void _make_sure_image_exists(int unicode)
+        {
+            std::string image_name = _get_image_name(unicode);
+            if (!image_manager.get()->contains_image(image_name))
+            {
+                vicmil::ImageRGBA_UChar image = font_loader.get()->get_character_image_rgba(unicode);
+                image_manager.get()->add_image(image_name, image);
+            }
+        }
+
+        inline vicmil::GuiEngine::RectGL get_unicode_image_pos_gl(int unicode)
+        {
+            _make_sure_image_exists(unicode);
+            std::string image_name = _get_image_name(unicode);
+            return image_manager.get()->get_image_pos_gl(image_name);
+        }
+
+        inline vicmil::RectT<int> get_unicode_image_pos_pixels(int unicode)
+        {
+            _make_sure_image_exists(unicode);
+            std::string image_name = _get_image_name(unicode);
+            return image_manager.get()->get_image_pos_pixels(image_name);
+        }
+    };
+
+    class TextManager
+    /**
+     * Used for drawing text on the screen
+     */
+    {
+    public:
+        std::shared_ptr<FontImageManager> font_image_manager;
+
+        // The Unicode characters used in the text
+        std::vector<int> _text_unicode;
+        RectT<int> _boundary;
+
+        // If the text should wrap around if it is outside boundary
+        bool _wrap;
+
+        // Where each letter should be drawn, and where on the texture the image of the character can be found
+        std::vector<RectT<int>> _draw_positions;
+        std::vector<RectT<float>> _tex_positions;
+
+        // Used while building the draw positions
+        int _newline_offset_x = 0;
+        int _newline_offset_y = 0;
+        std::vector<RectT<int>> _raw_draw_positions; // The draw positions if ignoring newlines, wrapping and the boundry
+
+        // How much to offset, used for scroll etc. and specified by the user
+        int _scroll_offset_x;
+        int _scroll_offset_y;
+
+        void set_scroll_offset(int x, int y)
+        {
+            _scroll_offset_x = x;
+            _scroll_offset_y = y;
+        }
+        void set_boundry(RectT<int> rect)
+        {
+            _boundary = rect;
+        }
+        void set_wrap(bool enabled)
+        {
+            _wrap = enabled;
+        }
+        int get_line_height()
+        {
+            return font_image_manager.get()->font_loader.get()->fontLoaders[0].line_height;
+        }
+        int get_line_spacing()
+        {
+            return 0; // TODO
+        }
+        void _handle_newline(int letter_index)
+        {
+            _newline_offset_y += get_line_height();
+            if (_raw_draw_positions.size() > letter_index)
+            {
+                _newline_offset_x = -_raw_draw_positions[letter_index + 1].min_x();
+            }
+        }
+        bool _handle_wrap(int letter_index)
+        {
+            // If the character is outside the boundry, wrap it
+            if (_wrap && _draw_positions[letter_index].max_x() > _boundary.max_x())
+            {
+                _handle_newline(letter_index); // Add a newline
+                return true;
+            }
+            return false;
+        }
+        void _handle_outside_boundry_cases(int letter_index)
+        {
+            RectT<int> &drawPos = _draw_positions[letter_index];
+            RectT<float> &texPos = _tex_positions[letter_index];
+
+            // Save original sizes for calculating ratios
+            int originalDrawW = drawPos.w;
+            int originalDrawH = drawPos.h;
+            float originalTexW = texPos.w;
+            float originalTexH = texPos.h;
+
+            // Helper lambdas
+            auto clip_left = [&](int clipX)
+            {
+                int diff = clipX - drawPos.x;
+                drawPos.x += diff;
+                drawPos.w -= diff;
+                texPos.x += (diff / static_cast<float>(originalDrawW)) * originalTexW;
+                texPos.w -= (diff / static_cast<float>(originalDrawW)) * originalTexW;
+            };
+
+            auto clip_top = [&](int clipY)
+            {
+                int diff = clipY - drawPos.y;
+                drawPos.y += diff;
+                drawPos.h -= diff;
+                texPos.y += (diff / static_cast<float>(originalDrawH)) * originalTexH;
+                texPos.h -= (diff / static_cast<float>(originalDrawH)) * originalTexH;
+            };
+
+            auto clip_right = [&](int clipMaxX)
+            {
+                int excess = (drawPos.x + drawPos.w) - clipMaxX;
+                drawPos.w -= excess;
+                texPos.w -= (excess / static_cast<float>(originalDrawW)) * originalTexW;
+            };
+
+            auto clip_bottom = [&](int clipMaxY)
+            {
+                int excess = (drawPos.y + drawPos.h) - clipMaxY;
+                drawPos.h -= excess;
+                texPos.h -= (excess / static_cast<float>(originalDrawH)) * originalTexH;
+            };
+
+            // Perform the clipping
+            if (_boundary.x > drawPos.x)
+            {
+                clip_left(_boundary.x);
+            }
+
+            if (_boundary.y > drawPos.y)
+            {
+                clip_top(_boundary.y);
+            }
+
+            if (_boundary.max_x() < drawPos.x + drawPos.w)
+            {
+                clip_right(_boundary.max_x());
+            }
+
+            if (_boundary.max_y() < drawPos.y + drawPos.h)
+            {
+                clip_bottom(_boundary.max_y());
+            }
+        }
+        void update_text_positions(std::vector<int> &text_unicode)
+        {
+            _text_unicode = text_unicode;
+
+            // Print("Load draw positions");
+            if (!font_image_manager)
+            {
+                ThrowError("No font image manager defined");
+            }
+            if (!font_image_manager.get()->font_loader)
+            {
+                ThrowError("No font loader defined");
+            }
+            _raw_draw_positions = font_image_manager.get()->font_loader.get()->get_character_image_positions(text_unicode);
+            _draw_positions = _raw_draw_positions;
+
+            // Print("Resize tex positions");
+            _tex_positions.resize(text_unicode.size(), vicmil::GuiEngine::RectGL(0, 0, 0, 0));
+
+            // Add some offset to handle newlines, since the text is otherwise on one line
+            _newline_offset_x = 0;
+            _newline_offset_y = get_line_height();
+
+            // Print("Iterate through unicode");
+            for (int i = 0; i < text_unicode.size(); i++)
+            {
+                // Handle newlines
+                // Print("Handle newline");
+                if (_text_unicode[i] == '\n')
+                {
+                    _handle_newline(i);
+                    continue;
+                }
+
+                // Add additional offset parameters
+                // Print("Add offset");
+                _draw_positions[i].x = _raw_draw_positions[i].x + _newline_offset_x + _boundary.x;
+                _draw_positions[i].y = _raw_draw_positions[i].y + _newline_offset_y + _boundary.y;
+
+                // Wrap text if outside the screen on the right
+                if (_handle_wrap(i))
+                {
+                    _draw_positions[i].x = _raw_draw_positions[i].x + _newline_offset_x + _boundary.x;
+                    _draw_positions[i].y = _raw_draw_positions[i].y + _newline_offset_y + _boundary.y;
+                }
+
+                _draw_positions[i].x += _scroll_offset_x;
+                _draw_positions[i].y += _scroll_offset_y;
+
+                // Print("Handle boundry");
+                // If letter is visible
+                if (_boundary.is_overlapping(_draw_positions[i]))
+                {
+                    // Get the texture position of the letter
+                    _tex_positions[i] = font_image_manager.get()->get_unicode_image_pos_gl(text_unicode[i]);
+
+                    _handle_outside_boundry_cases(i);
+                }
+            }
+        }
+        void update_text_positions(std::string text_utf8)
+        {
+            std::vector<int> text_unicode_ = vicmil::utf8ToUnicodeCodePoints(text_utf8);
+            return update_text_positions(text_unicode_);
+        }
+        vicmil::RectT<int> get_cursor_pos_pixel(int cursor_index)
+        {
+            vicmil::RectT<int> pos;
+            pos.h = get_line_height();
+            pos.w = std::ceil(pos.h / 10.0);
+            pos.y = _scroll_offset_y + pos.w * 2;
+            pos.x = _boundary.x;
+
+            if (cursor_index <= 0 || _draw_positions.size() == 0)
+            {
+                // Do nothing
+            }
+            else if (cursor_index < _draw_positions.size())
+            {
+                pos.x = _draw_positions[cursor_index].x - pos.w;
+            }
+            else
+            {
+                if (_text_unicode.back() != '\n')
+                {
+                    pos.x = _draw_positions.back().max_x();
+                }
+            }
+
+            for (int i = 0; i < cursor_index; i++)
+            {
+                if (i >= _draw_positions.size())
+                {
+                    break;
+                }
+                if (_text_unicode[i] == '\n')
+                {
+                    pos.y += get_line_height();
+                }
+            }
+            return pos;
+        }
+        vicmil::RectT<float> get_cursor_pos_gl(int cursor_index, int screen_w, int screen_h)
+        {
+            vicmil::RectT<int> rect = get_cursor_pos_pixel(cursor_index);
+            return vicmil::GuiEngine::rect_to_rect_gl(rect, screen_w, screen_h);
+        }
+
+        std::vector<CoordTexCoord_XYZUV_f> get_draw_vec(int screen_w, int screen_h, int layer)
+        {
+            std::vector<CoordTexCoord_XYZUV_f> return_vec;
+            for (int i = 0; i < _draw_positions.size(); i++)
+            {
+                if (_tex_positions[i].w > 0)
+                {
+                    vicmil::GuiEngine::RectGL rect_gl_pos = vicmil::GuiEngine::rect_to_rect_gl(_draw_positions[i], screen_w, screen_h);
+                    vicmil::add_texture_rect_to_triangle_buffer(return_vec, rect_gl_pos, layer, _tex_positions[i]);
+                }
+            }
+            return return_vec;
+        }
+        TextManager() {}
+        TextManager(std::shared_ptr<FontImageManager> font_image_manager_) : font_image_manager(font_image_manager_)
+        {
+        }
+    };
+
+    struct WidgetData
+    {
+        // graphics
+        std::vector<vicmil::CoordColor_XYZRGBA_f> color_triangles = {};
+        std::vector<vicmil::CoordTexCoord_XYZUV_f> texture_triangles = {};
+
+        // User input
+        std::string gui_element_at_mouse;
+        MouseState mouse_state;
+        KeyboardState keyboard_state;
+        std::vector<SDL_Event> events;
+        bool mouse_left_clicked = false;
+        bool mouse_right_clicked = false;
+
+        // Other
+        std::shared_ptr<vicmil::ImageManager> image_manager;
+        std::shared_ptr<FontImageManager> font_image_manager;
+        std::shared_ptr<vicmil::GuiEngine> gui_engine;
+        std::shared_ptr<vicmil::MultiFontLoader> font_loader_;
+        vicmil::RandomNumberGenerator rand_gen = vicmil::RandomNumberGenerator();
+        WidgetData()
+        {
+            image_manager = std::make_shared<vicmil::ImageManager>(2048, 2048);
+            font_loader_ = std::make_shared<vicmil::MultiFontLoader>();
+            font_image_manager = std::make_shared<FontImageManager>(image_manager, font_loader_);
+            gui_engine = std::make_shared<vicmil::GuiEngine>();
+        }
+    };
+    class Widget
+    {
+    public:
+        virtual void update() = 0; // Update the widget and add new draw triangles
+        virtual std::string get_name() = 0;
+        static std::string get_unique_id()
+        {
+            static int counter = 0;
+            counter++;
+            return std::to_string(counter);
+        }
+    };
+    class WidgetManager
+    {
+    public:
+        std::shared_ptr<WidgetData> data = std::make_shared<WidgetData>();
+        std::map<std::string, std::weak_ptr<Widget>> widgets;
+        WidgetManager() {}
+        void update(vicmil::Window &window, const std::vector<SDL_Event> &events)
+        {
+            // Reset draw triangles
+            data.get()->texture_triangles = {};
+            data.get()->color_triangles = {};
+
+            // Handle user input
+            data.get()->mouse_state = MouseState(window.window);
+            data.get()->keyboard_state = KeyboardState();
+            data.get()->events = events;
+            data.get()->mouse_left_clicked = vicmil::mouse_left_clicked(events);
+            data.get()->mouse_right_clicked = vicmil::mouse_right_clicked(events);
+
+            // Update gui engine
+            int window_w, window_h;
+            vicmil::get_window_size(window.window, window_w, window_h);
+            data.get()->gui_engine.get()->set_screen_size(window_w, window_h);
+            data.get()->gui_engine.get()->build();
+            data.get()->gui_element_at_mouse = data.get()->gui_engine.get()->get_xy_element(
+                data.get()->mouse_state.x(),
+                data.get()->mouse_state.y());
+
+            // Update all the widgets
+            std::vector<std::string> widgets_to_remove;
+            for (auto widget : widgets)
+            {
+                std::weak_ptr<Widget> widget_ptr = widget.second;
+                if (widget_ptr.expired())
+                {
+                    widgets_to_remove.push_back(widget.first);
+                    continue;
+                }
+                widget_ptr.lock().get()->update();
+            }
+
+            // Remove widgets which have expired
+            for (int i = 0; i < widgets_to_remove.size(); i++)
+            {
+                widgets.erase(widgets_to_remove[i]);
+            }
+        }
+        void load_font(unsigned char *font_data, unsigned int font_data_size)
+        {
+            data.get()->font_image_manager.get()->font_loader.get()->load_font_from_memory(font_data, font_data_size);
+        }
+        void load_image(std::string image_name, ImageRGBA_UChar &image)
+        {
+        }
+        void draw(vicmil::DefaultGpuPrograms &gpu_programs)
+        {
+            data.get()->image_manager.get()->update_gpu_image_with_cpu_image();
+
+            if (data.get()->color_triangles.size())
+            {
+                gpu_programs.draw_2d_CoordColor_XYZRGBA_f_vertex_buffer(data.get()->color_triangles);
+            }
+            if (data.get()->texture_triangles.size())
+            {
+                gpu_programs.draw_2d_CoordTexCoord_XYZUV_f_vertex_buffer(data.get()->texture_triangles, data.get()->image_manager.get()->gpu_image);
+            }
+        }
+        void add_widget(std::weak_ptr<Widget> widget)
+        {
+            widgets[widget.lock().get()->get_name()] = widget;
+        }
+    };
+
+    class Tree
+    {
+    public:
+        class _TreeNode
+        {
+        public:
+            std::string name;
+            std::shared_ptr<std::string> data;
+            std::vector<std::unique_ptr<_TreeNode>> children;
+
+            // Constructor
+            _TreeNode(const std::string &val) : name(val) {}
+
+            // Add a child by value
+            void addChild(const std::string &childValue)
+            {
+                children.push_back(std::unique_ptr<_TreeNode>(new _TreeNode(childValue)));
+            }
+
+            // Get a child by index (non-const)
+            _TreeNode &getChild(size_t index)
+            {
+                return *children.at(index);
+            }
+
+            // Get a child by index (const)
+            const _TreeNode &getChild(size_t index) const
+            {
+                return *children.at(index);
+            }
+
+            // Get number of children
+            size_t childCount() const
+            {
+                return children.size();
+            }
+
+            // Find a child's index by name
+            int findChildIndex(const std::string &name) const
+            {
+                for (size_t i = 0; i < children.size(); ++i)
+                {
+                    if (children[i]->name == name)
+                    {
+                        return static_cast<int>(i);
+                    }
+                }
+                return -1; // Not found
+            }
+
+            // Remove a child by index
+            void removeChild(size_t index)
+            {
+                if (index >= children.size())
+                {
+                    throw std::out_of_range("Child index out of range");
+                }
+                children.erase(children.begin() + index);
+            }
+
+            // Remove a child by name
+            bool removeChild(const std::string &name)
+            {
+                int index = findChildIndex(name);
+                if (index != -1)
+                {
+                    removeChild(static_cast<size_t>(index));
+                    return true; // Successfully removed
+                }
+                return false; // Child not found
+            }
+
+            // Prevent copy
+            _TreeNode(const _TreeNode &) = delete;
+            _TreeNode &operator=(const _TreeNode &) = delete;
+
+            // Allow move
+            _TreeNode(_TreeNode &&) = default;
+            _TreeNode &operator=(_TreeNode &&) = default;
+
+            // Print the tree recursively
+            std::string to_string(const _TreeNode &node, int depth = 0) const
+            {
+                std::string out_str = std::string(depth * 2, ' ') + node.name + "\n";
+                for (const auto &child : node.children)
+                {
+                    out_str += to_string(*child, depth + 1);
+                }
+                return out_str;
+            }
+
+            std::string to_string() const { return to_string(*this); }
+        };
+
+        std::unique_ptr<Tree::_TreeNode> root_node;
+
+        Tree() : root_node(new Tree::_TreeNode("root")) {}
+
+        void add_tree_path(std::vector<std::string> tree_path)
+        {
+            _TreeNode *current_node = root_node.get();
+
+            for (const auto &name : tree_path)
+            {
+                // Check if the child exists
+                int child_index = current_node->findChildIndex(name);
+                if (child_index == -1)
+                {
+                    // Add the child if it doesn't exist
+                    current_node->addChild(name);
+                }
+
+                // Move to the next level
+                child_index = current_node->findChildIndex(name);
+                current_node = &current_node->getChild(static_cast<size_t>(child_index));
+            }
+        }
+        void remove_tree_path(std::vector<std::string> tree_path)
+        {
+            _TreeNode *current_node = root_node.get();
+
+            // Traverse the path
+            for (int i = 0; i < tree_path.size() - 1; i++)
+            {
+                int child_index = current_node->findChildIndex(tree_path[i]);
+                if (child_index == -1)
+                {
+                    // If any part of the path doesn't exist, we can't remove it
+                    return;
+                }
+                current_node = &current_node->getChild(static_cast<size_t>(child_index));
+            }
+
+            size_t index_to_remove = current_node->findChildIndex(tree_path.back());
+
+            if (index_to_remove == -1)
+            {
+                // If any part of the path doesn't exist, we can't remove it
+                return;
+            }
+
+            // Now we can safely remove the last part of the path
+            current_node->removeChild(index_to_remove);
+        }
+        void _get_all_tree_paths_recursive(const _TreeNode &node, std::vector<std::string> current_path, std::vector<std::vector<std::string>> &all_paths) const
+        {
+            // Add the current node to the path
+            current_path.push_back(node.name);
+
+            // add the current path to the list
+            all_paths.push_back(current_path);
+
+            // Recursively process the children
+            for (const auto &child : node.children)
+            {
+                _get_all_tree_paths_recursive(*child, current_path, all_paths);
+            }
+        }
+
+        std::vector<std::vector<std::string>> get_all_tree_paths()
+        {
+            std::vector<std::vector<std::string>> all_paths = {{}};
+            for (const auto &child : root_node->children)
+            {
+                _get_all_tree_paths_recursive(*child, {}, all_paths);
+            }
+            return all_paths;
+        }
+        std::shared_ptr<std::string> *get_tree_path_data(std::vector<std::string> tree_path)
+        {
+            _TreeNode *current_node = root_node.get();
+
+            for (const auto &name : tree_path)
+            {
+                int child_index = current_node->findChildIndex(name);
+                if (child_index == -1)
+                {
+                    // Path doesn't exist
+                    return nullptr;
+                }
+                current_node = &current_node->getChild(static_cast<size_t>(child_index));
+            }
+
+            // Return the data for the node at the end of the path
+            return &current_node->data;
+        }
+        std::vector<std::string> get_tree_path_children(std::vector<std::string> tree_path)
+        {
+            _TreeNode *current_node = root_node.get();
+
+            // Traverse to the node at the end of the path
+            for (const auto &name : tree_path)
+            {
+                int child_index = current_node->findChildIndex(name);
+                if (child_index == -1)
+                {
+                    // Path doesn't exist
+                    return {};
+                }
+                current_node = &current_node->getChild(static_cast<size_t>(child_index));
+            }
+
+            // Collect the names of the children of the last node
+            std::vector<std::string> children_names;
+            for (const auto &child : current_node->children)
+            {
+                children_names.push_back(child->name);
+            }
+
+            return children_names;
+        }
+        std::string to_string()
+        {
+            return root_node->to_string();
+        }
+    };
+}

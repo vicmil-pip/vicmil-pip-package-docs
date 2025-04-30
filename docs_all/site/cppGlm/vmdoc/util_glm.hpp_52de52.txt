@@ -1,0 +1,12 @@
+/*
+[vmdoc:description] Includes glm, which is a library that can be used for linear algebra and math [vmdoc:enddescription]
+*/
+
+// ============================================================
+//                           Include
+// ============================================================
+
+#pragma once
+
+#include "glm/glm/gtx/transform.hpp"
+#include "glm/glm/gtx/string_cast.hpp"

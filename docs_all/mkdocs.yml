@@ -1,0 +1,39 @@
+site_name: Combined MkDocs Site
+theme:
+  name: material
+  features:
+  - content.code.copy
+  palette:
+  - media: '(prefers-color-scheme: light)'
+    scheme: default
+    toggle:
+      icon: material/toggle-switch-off-outline
+      name: Switch to dark mode
+  - media: '(prefers-color-scheme: dark)'
+    scheme: slate
+    toggle:
+      icon: material/toggle-switch
+      name: Switch to light mode
+nav:
+- Home: index.md
+- projects:
+  - cppBasics: '!include ./projects/cppBasics/mkdocs.yml'
+  - cppBinPacking: '!include ./projects/cppBinPacking/mkdocs.yml'
+  - cppBuild: '!include ./projects/cppBuild/mkdocs.yml'
+  - cppEmsdk: '!include ./projects/cppEmsdk/mkdocs.yml'
+  - cppGlm: '!include ./projects/cppGlm/mkdocs.yml'
+  - cppMiniz: '!include ./projects/cppMiniz/mkdocs.yml'
+  - cppOpengl: '!include ./projects/cppOpengl/mkdocs.yml'
+  - cppStb: '!include ./projects/cppStb/mkdocs.yml'
+  - cppVicmilGui: '!include ./projects/cppVicmilGui/mkdocs.yml'
+  - pyMkDocs: '!include ./projects/pyMkDocs/mkdocs.yml'
+markdown_extensions:
+- codehilite:
+    guess_lang: false
+- fenced_code
+- pymdownx.superfences
+- pymdownx.tabbed
+- attr_list
+plugins:
+- monorepo
+- search
