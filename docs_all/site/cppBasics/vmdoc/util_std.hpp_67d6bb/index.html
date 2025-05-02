@@ -67,6 +67,11 @@
     <label class="md-overlay" for="__drawer"></label>
     <div data-md-component="skip">
       
+        
+        <a href="#assertx" class="md-skip">
+          Skip to content
+        </a>
+      
     </div>
     <div data-md-component="announce">
       
@@ -2001,6 +2006,95 @@
   
   
   
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#assertx" class="md-nav__link">
+    <span class="md-ellipsis">
+      Assert(x)
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#throwerrorx" class="md-nav__link">
+    <span class="md-ellipsis">
+      ThrowError(x)
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#asserteqv1-v2-deviance" class="md-nav__link">
+    <span class="md-ellipsis">
+      AssertEq(v1, v2, deviance)
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#pad_strstr-length" class="md-nav__link">
+    <span class="md-ellipsis">
+      pad_str(str, length)
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#split_stringstr-separator" class="md-nav__link">
+    <span class="md-ellipsis">
+      split_string(str, separator)
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#printx" class="md-nav__link">
+    <span class="md-ellipsis">
+      Print(x)
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#printexprx" class="md-nav__link">
+    <span class="md-ellipsis">
+      PrintExpr(x)
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#addtesttest_name" class="md-nav__link">
+    <span class="md-ellipsis">
+      AddTest(test_name)
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#vec_to_strvec" class="md-nav__link">
+    <span class="md-ellipsis">
+      vec_to_str(vec)
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
 </nav>
                   </div>
                 </div>
@@ -2025,6 +2119,56 @@ generated_from: vmdoc
 source_code_file: util_std.hpp_67d6bb.txt</p>
 <hr />
 <p><a href="../util_std.hpp_67d6bb.txt">📄 View raw source code</a></p>
+<h2 id="assertx">Assert(x)</h2>
+<p>Assert that some expression is true, and throw an error if not</p>
+<h2 id="throwerrorx">ThrowError(x)</h2>
+<p>Print an error message and throw an exception</p>
+<h2 id="asserteqv1-v2-deviance">AssertEq(v1, v2, deviance)</h2>
+<p>Assert that two numerical values are equal within a given deviance
+- <code>v1</code>: First value
+- <code>v2</code>: Second value
+- <code>deviance</code>: Allowed difference between <code>v1</code> and <code>v2</code></p>
+<h2 id="pad_strstr-length">pad_str(str, length)</h2>
+<div class="codehilite"><pre><span></span><code>Pad a string with spaces until it reaches the desired length
+- `str`: Input string
+- `length`: Target length after padding
+</code></pre></div>
+
+<h2 id="split_stringstr-separator">split_string(str, separator)</h2>
+<div class="codehilite"><pre><span></span><code>Split a string by a given separator character
+- `str`: The string to split
+- `separator`: The character used to divide the string
+</code></pre></div>
+
+<h2 id="printx">Print(x)</h2>
+<p>Print a value with contextual info (file, line, function)</p>
+<h2 id="printexprx">PrintExpr(x)</h2>
+<p>Print an expression and its value with contextual info</p>
+<h2 id="addtesttest_name">AddTest(test_name)</h2>
+<p>Register a function as a test case to be executed later</p>
+<p>int add_(int x, int y)
+    {
+        return x + y;
+    }</p>
+<div class="codehilite"><pre><span></span><code>// Add a test for the function
+void TEST_add_()
+{
+    assert(add_(1, 2) == 3);
+}
+AddTest(TEST_add_);
+
+// Run all tests
+// int main() {
+//    vicmil::TestClass::run_all_tests();
+//    return 0;
+//}
+//
+</code></pre></div>
+
+<h2 id="vec_to_strvec">vec_to_str(vec)</h2>
+<p>Convert a vector of numbers to a formatted string
+- <code>vec</code>: The input vector</p>
+<p>example: "{123.321, 314.0, 42.0}"</p>
 
 
 
